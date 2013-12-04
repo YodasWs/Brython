@@ -1,0 +1,45 @@
+﻿main {
+	width: 98%;
+	width: -webkit-calc(100% - 2em);
+	width: calc(100% - 2em);
+	max-width: 700px; margin: 0 auto;
+}
+
+body > header {
+	margin: 0; background: lightgrey;
+}
+body > header > h1 {
+	line-height: 1.6em; margin: 0;
+}
+body > canvas {
+	margin: 1em auto;
+}
+
+#gameinfo {
+	width: 300px;
+	height: 50px;
+	background: white;
+	position: absolute;
+	border: 1px solid black;
+	border-bottom-right-radius: 10px;
+}
+
+@media mobile, screen and (max-width: 500px) {
+	body > header {
+		text-align: left;
+		background-color: lightblue;
+		transition: background-color 2s;
+	}
+	body > header > h1 {
+	}
+	main { text-align: justify; }
+}
+@media screen and (min-width: 500px) {
+	body > header {
+		text-align: center;
+		background-color: lightgrey;
+		transition: background-color 2;
+	}
+	body > header > h1 {
+	}
+}

@@ -1,0 +1,650 @@
+﻿<!DOCTYPE html>
+<html lang="en-us">
+<head>
+<title>Brython</title>
+<meta charset="UTF-8"/>
+<meta name="format-detection" content="telephone=no"/>
+<meta name="viewport" content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height" />
+<link rel="stylesheet" href="www/res/bootstrap.min.css"/>
+<link rel="stylesheet" href="www/css/app.css"/>
+<script src="www/res/zepto.min.js"></script>
+<!--
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+<script src="www/res/bootstrap.min.js"></script>
+-->
+<script src="www/res/phaser.min.js"></script>
+<script src="www/js/world.js"></script>
+<script src="www/js/units.js"></script>
+<script>
+// Global Variables
+var	game,
+	width,
+	scale = { x:.5, y:.5 },
+	activeUnit = {index:-1};
+
+$(document).ready(function() {
+width = Math.max(Math.min($(document).width() * .95, 900), 600);
+// Build Game
+game = new Phaser.Game(width, Math.floor(width * 16 / 9), Phaser.CANVAS, 'main', {
+preload : function() {
+//	game.load.image('background', 'www/img/terrain/grass.jpg'); // TODO: Get water/sea background
+	game.stage.backgroundColor = 'lightseagreen';
+	game.turn = 0;
+	game.score = 0;
+
+	// Load Terrain Images
+	$.each(['grass', 'water'], function(i, val) {
+		game.load.image('tile.' + val, 'www/img/tiles/' + val + '.png');
+	});
+
+	// Load Overlay Images
+	game.load.spritesheet('city', 'www/img/overlays/city.png', 200, 200);
+	$.each(['roman', 'britton', 'saxon'], function(i, faction) {
+		$.each(unitTypes, function(unit, stats) {
+			game.load.image('unit.' + faction + '.' + unit, 'www/img/' + faction + '/' + unit + '.png');
+		});
+	});
+
+	// Load Action Images
+	game.load.image('activeUnit', 'www/img/activeUnit.png');
+	$.each(actionSprites, function(action, sprite) {
+		game.load.image(action, sprite.src);
+	});
+},
+create : function() {
+/*	// Add Background and Scale to Size
+	var background = game.add.tileSprite(0, 0, 1024, 1024, 'background');
+	background.scale.y = game.height / background.height;
+	background.scale.x = game.width / background.width;
+//*/
+	// Build the Board
+	$.each(world, function(i, item) {
+		var x = getTileX(item.row, item.col);
+		var y = getTileY(item.row, item.col);
+		$.extend(world[i], game.add.tileSprite(x, y, 200, 200, 'tile.' + item.terrain), defaults.tile);
+		world[i].scale.x = scale.x;
+		world[i].scale.y = scale.y;
+		game.add.text(x+30, y+50, world[i].col + '×' + world[i].row, {
+			font: '12pt Arial', fill: 'lightgrey', align: 'center'
+		});
+		// Add City Overlay
+		if (world[i].city) {
+			world[i].overlay = game.add.sprite(x, y, 'city');
+			world[i].overlay.frame = frmOverlays.city[world[i].city];
+			world[i].overlay.scale.x = scale.x;
+			world[i].overlay.scale.y = scale.y;
+			$.extend(world[i].overlay, defaults.overlay);
+		}
+	});
+
+	// Active Unit Overlay
+	$.extend(activeUnit, game.add.sprite(-300, -300, 'activeUnit'));
+	activeUnit.anchor = {x:.5,y:.5};
+	activeUnit.scale.x = scale.x;
+	activeUnit.scale.y = scale.y;
+
+	// Place Starting Units
+	$.each(units, function(i, unit) {
+		var x = getTileX(unit.row, unit.col);
+		var y = getTileY(unit.row, unit.col);
+		$.extend(units[i], game.add.sprite(x, y, 'unit.' + unit.faction + '.' + unit.uType), unitTypes[unit.uType], defaults.units);
+		// Set Default Values
+		units[i].scale.x = scale.x;
+		units[i].scale.y = scale.y;
+	});
+
+	// Add Action Sprites
+	$.each(actionSprites, function(i, sprite) {
+		$.extend(actionSprites[i], game.add.sprite(-200, -200, i));
+		game.input.keyboard.addKeyCapture(sprite.key);
+		actionSprites[i].scale.x = scale.x;
+		actionSprites[i].scale.y = scale.y;
+		actionSprites[i].anchor = {x:.5,y:.5};
+	});
+
+	// Game Key Inputs
+	game.input.keyboard.addKeyCapture([
+		Phaser.Keyboard.SPACEBAR,
+		Phaser.Keyboard.W
+	]);
+game.input.keyboard.addCallbacks(game, function(event) {
+	// On Key Down
+
+	// Act on Active Unit
+	if (activeUnit.index >= 0 && units[activeUnit.index].moves > 0)
+	(function(event) {
+
+		var	col = units[activeUnit.index].col,
+			row = units[activeUnit.index].row,
+			tUnits = [], success = false,
+			x, y;
+
+		switch (event.keyCode) {
+		case Phaser.Keyboard.U:
+			// Move up and left
+			if (col % 2 == 0) row--;
+			col--;
+			break;
+		case Phaser.Keyboard.I:
+			// Move up
+			row--;
+			break;
+		case Phaser.Keyboard.O:
+			// Move up and right
+			if (col % 2 == 0) row--;
+			col++;
+			break;
+		case Phaser.Keyboard.J:
+			// Move down and left
+			if (col % 2 == 1) row++;
+			col--;
+			break;
+		case Phaser.Keyboard.K:
+			// Move down
+			row++;
+			break;
+		case Phaser.Keyboard.L:
+			// Move down and right
+			if (col % 2 == 1) row++;
+			col++;
+			break;
+		case Phaser.Keyboard.SPACEBAR:
+			// Stay
+			units[activeUnit.index].action = 'stay';
+		case Phaser.Keyboard.W:
+			// Wait
+			grabNextUnit();
+			return true;
+		default:
+			return false;
+		}
+
+		if (!isLegalMove(units[activeUnit.index], row, col)) return false;
+
+		tUnits = grabUnitsOnTile(row, col);
+		if (tUnits.length > 0 && units[tUnits[0]].faction != units[activeUnit.index].faction) {
+			if (!units[activeUnit.index].attack) return false;
+			// Battle !
+			success = battle(activeUnit.index, tUnits[0]);
+			if (!success) {
+				grabNextUnit();
+				return false;
+			}
+		}
+
+		// Now Move Unit
+		if (units[activeUnit.index].col != col || units[activeUnit.index].row != row) {
+			units[activeUnit.index].moves--;
+			units[activeUnit.index].col = col;
+			units[activeUnit.index].row = row;
+			x = getTileX(units[activeUnit.index].row, units[activeUnit.index].col);
+			y = getTileY(units[activeUnit.index].row, units[activeUnit.index].col);
+			units[activeUnit.index].body.velocity.x = 0;
+			units[activeUnit.index].body.velocity.y = 0;
+			game.physics.moveToXY(units[activeUnit.index], x, y, null, 700);
+		}
+	})(event); // end activeUnit
+});
+	$('#gameinfo').css({left:$('canvas').offset().left});
+	$(window).on('scroll', function(event) {
+		if ($(window).scrollTop() > $('canvas').offset().top) $('#gameinfo').css({
+			position:'fixed',top:'0px'
+		}); else $('#gameinfo').css({
+			position:'absolute',top:$('canvas').offset().top+'px'
+		});
+	}); // end document.scroll
+	endTurn();
+},
+update : function() {
+	// Update Game Info
+	$('#gameinfo').html('<b>Turn:</b> ' + game.turn + '<br/><b>Score:</b> ' + game.score);
+
+	if (game.paused) {
+		hideActions();
+		return false;
+	}
+	var movingUnits = false;
+
+	$.each(units, function(i, unit) {
+		// 'return true' == 'continue'
+		// 'return false' == 'break'
+
+		if (!unit.alive) {
+			unit.col = 0;
+			unit.row = 0;
+			unit.body.x = -300;
+			unit.body.y = -300;
+//			unit.destroy();
+			return true;
+		}
+
+		// Not Moving, continue
+		if (unit.body.velocity.x == 0 && unit.body.velocity.y == 0)
+			return true;
+
+		// Continue Movement to Desired Hex
+		movingUnits = true;
+		var x = getTileX(unit.row, unit.col);
+		var y = getTileY(unit.row, unit.col);
+		unit.body.velocity.x = 0;
+		unit.body.velocity.y = 0;
+		unit.x = unit.body.x;
+		unit.y = unit.body.y;
+		if (Math.abs(unit.body.x - x) <= 1 && Math.abs(unit.body.y - y) <= 1) {
+			// We Arrived, Stop
+			unit.body.velocity.x = 0;
+			unit.body.velocity.y = 0;
+
+			// Grab next Unit
+			if (i == activeUnit.index && !(unit.moves > 0)) grabNextUnit();
+
+		} else game.physics.moveToXY(unit, x, y, null, 500);
+	});
+
+	// Update Tile Overlays
+	if (!movingUnits && activeUnit.index == -1) $.each(world, function(i, tile) {
+		if (world[i].overlay && !world[i].city) {
+			// City Destroyed
+			world[i].overlay.x = -300;
+			world[i].overlay.y = -300;
+		} else if (world[i].overlay && frmOverlays.city[tile.city] != world[i].overlay.frame) {
+			// City Changed Ownership
+			world[i].overlay.frame = frmOverlays.city[tile.city];
+		}
+	});
+
+	// Display/Hide Action Sprites
+	if (activeUnit.index > -1) {
+		if (units[activeUnit.index].body.velocity.x == 0 && units[activeUnit.index].body.velocity.y == 0) {
+			showActions();
+		} else hideActions();
+	} else hideActions();
+
+	if (!movingUnits && activeUnit.index == -1) grabNextUnit();
+},
+render : function() {
+//game.debug.renderSpriteBody(units[activeUnit.index]);
+//game.debug.renderText('hello world', 16, 32);
+}
+}); // end new Phaser.Game
+}); // end document.ready
+
+function isLegalMove(unit, row, col) {
+	// Check Board Bounds
+	if (row < 0 || col < 0) return false;
+	if (row >= board.rows || col >= board.cols) return false;
+	var target, tileUnits;
+
+	// Grab Target Tile
+	target = world[getTile(row, col)];
+	tileUnits = grabUnitsOnTile(row, col);
+
+	// Check Move into Roman City
+	switch (target.city) {
+	case 'roman':
+		switch (unit.faction) {
+		case 'britton':
+			if (tileUnits.length > 0) return false;
+			else return true;
+		}
+	}
+
+	// Check for Battle
+	if (tileUnits.length && units[tileUnits[0]].faction != unit.faction) {
+		if (unit.attack == 0) return false;
+		if (units[tileUnits[0]].faction == 'britton' && unit.faction == 'roman') return false;
+	}
+
+	// Clear, Check Terrain
+	switch (target.terrain) {
+	case 'water':
+		return false;
+	case 'grass':
+		return true;
+	default:
+		return false;
+	}
+}
+function grabNextUnit() {
+	var lastUnit = -1, nextUnit = -1;
+	$.each(units, function(i, unit) {
+		// 'return true' == 'continue'
+		// 'return false' == 'break'
+		if (unit.faction == 'britton' && unit.moves > 0 && unit.action != 'stay' && unit.alive) {
+			nextUnit = i;
+			if (lastUnit == -1) lastUnit = i;
+			if (nextUnit > activeUnit.index)
+				return false;
+			if (nextUnit == activeUnit.index)
+				nextUnit = lastUnit;
+		}
+	});
+
+	// No Units to Grab
+	if (!(nextUnit > -1)) return endTurn();
+
+	// Set Active Unit
+	activeUnit.index = nextUnit;
+//	units[activeUnit.index].bringToTop();
+}
+function endTurn() {
+	var intUnits = 0,
+		rmRoman = 0;
+
+	if (game.turn == 20) return endGame();
+
+	// Reset Units
+	activeUnit.index = -1;
+	$.each(units, function(i, unit) {
+		var archetype = unitTypes[unit.uType];
+		$.each(['moves', 'action'], function(i, val) {
+			unit[val] = archetype[val];
+		});
+	});
+
+console.log('Ending turn ' + game.turn);
+
+	intUnits = 0
+	// Move Roman Troops
+	$.each(units, function(i, unit) {
+		if (game.turn == 0) return false;
+		if (!unit.alive) return true;
+		if (unit.faction != 'roman') return true;
+
+		var tile = getTile(unit.row, unit.col),
+			tileUnits = [],
+			moveTo = null;
+
+		// Remove Unit on Southern Coast
+		if (!rmRoman && game.turn > 5 && ++intUnits > 10 - game.turn && (
+		    (unit.row >= 15 && unit.col + unit.col % 2 >= 10) || (unit.row >= 16 && unit.col + unit.col % 2 >= 8))){
+			units[i].alive = false;
+			rmRoman++;
+			return true;
+		}
+
+		// Without London, Remove Second Unit
+		if (getCity(14, 8) != 'roman' && rmRoman == 1 && tile.city == '') {
+			units[i].alive = false;
+			rmRoman++;
+			return true;
+		}
+
+		// Move Towards South Coast
+		if (unit.row < 10 + game.turn) {
+
+			// Stop on Southeast Coast
+			if ((unit.row >= 15 && unit.col + unit.col % 2 >= 10) || (unit.row >= 16 && unit.col + unit.col % 2 >= 8))
+				return true;
+
+			// Don't Abandon London Early
+			if (unit.row == 14 && unit.col == 8 && game.turn < 10) return true;
+
+			// Look for Legal Move
+			if (isLegalMove(unit, unit.row + 1, unit.col)) {
+				// Move K
+				moveTo = { row: unit.row + 1, col: unit.col };
+			} else if (unit.col % 2) {
+				if (isLegalMove(unit, unit.row + 1, unit.col + 1)) {
+					// Move L
+					moveTo = { row: unit.row + 1, col: unit.col + 1 };
+				} else if (isLegalMove(unit, unit.row + 1, unit.col - 1)) {
+					// Move J
+					moveTo = { row: unit.row + 1, col: unit.col - 1 };
+				} else if (unit.col < 6 && isLegalMove(unit, unit.row, unit.col + 1)) {
+					// Move O
+					moveTo = { row: unit.row, col: unit.col + 1 };
+				}
+			} else if (unit.col % 2 == 0) {
+				if (isLegalMove(unit, unit.row, unit.col + 1)) {
+					// Move L
+					moveTo = { row: unit.row, col: unit.col + 1 };
+				} else if (isLegalMove(unit, unit.row, unit.col - 1)) {
+					// Move J
+					moveTo = { row: unit.row, col: unit.col - 1 };
+				} else if (unit.col < 6 && isLegalMove(unit, unit.row - 1, unit.col + 1)) {
+					// Move O
+					moveTo = { row: unit.row - 1, col: unit.col + 1 };
+				}
+			}
+
+			if (moveTo) {
+
+				// Check for Battle
+				tileUnits = grabUnitsOnTile(moveTo.row, moveTo.col);
+				if (tileUnits.length > 0 && units[tileUnits[0]].faction != units[i].faction && units[i].attack > 0) {
+					// Battle !
+					success = battle(i, tileUnits[0]);
+					if (!success) return true;
+				}
+
+				// Move Unit Southwardly
+				moveTo = getTile(moveTo.row, moveTo.col);
+				if (world[moveTo].city) world[moveTo].city = 'roman';
+				units[i].col = world[moveTo].col;
+				units[i].row = world[moveTo].row;
+				game.physics.moveToXY(unit, world[moveTo].x, world[moveTo].y, null, 500);
+				return true;
+			}
+		}
+	});
+
+	intUnits = 0;
+	// TODO: Move Saxon Troops
+	$.each(units, function(i, unit) {
+		if (game.turn == 0) return false;
+		if (!unit.alive) return true;
+		if (unit.faction != 'saxon') return true;
+		var moveTo, uTile, neighbors;
+
+		while (units[i].moves > 0) {
+
+			moveTo = { intTop: 0, sqrTop: '' };
+			uTile = getTile(unit.row, unit.col);
+			neighbors = {
+				U:{ row: unit.row-(1-unit.col%2), col: unit.col-1, priority:0 },
+				I:{ row: unit.row-1, col: unit.col, priority:0 },
+				O:{ row: unit.row-(1-unit.col%2), col: unit.col+1, priority:0 },
+				J:{ row: unit.row+unit.col%2, col: unit.col-1, priority:0 },
+				K:{ row: unit.row+1, col: unit.col, priority:0 },
+				L:{ row: unit.row+unit.col%2, col: unit.col+1, priority:0 }
+			};
+
+		// Count Number of Saxon Units
+		if (unit.uType == 'soldier') intUnits++;
+
+		// TODO: Determine Where to Move
+		$.each(neighbors, function(key, obj) {
+			neighbors[key].legalMove = isLegalMove(unit, obj.row, obj.col);
+			if (!neighbors[key].legalMove) return true;
+			var nTile = getTile(obj.row, obj.col),
+				tileUnits = [],
+				nUnits = [];
+
+			// Priority: Invade City
+			if (nTile.city && nTile.city != 'saxon') neighbors[key].priority += 2;
+
+			// Priority: Check for Units
+			nUnits = grabUnitsOnTile(obj.row, obj.col);
+			if (!nUnits.length) neighbors[key].priority += 0;
+			else if (units[nUnits[0]].faction == 'saxon') neighbors[key].priority += 1;
+			else if (units[nUnits[0]].faction != 'saxon') {
+				if (world[uTile].city == 'saxon') {
+					neighbors.U.legalMove = false;
+					neighbors.I.legalMove = false;
+					neighbors.O.legalMove = false;
+					neighbors.J.legalMove = false;
+					neighbors.K.legalMove = false;
+					neighbors.L.legalMove = false;
+					return false;
+				}
+				neighbors[key].priority += 2;
+				units[i].moves = 0;
+			}
+		});
+
+		// Determine Top Priority Tile
+		$.each(neighbors, function(key, obj) {
+			if (!obj.legalMove) return true;
+			if ((obj.priority > moveTo.intTop && Math.random() > .2)
+			    || (obj.priority == moveTo.intTop && Math.random() > .49))
+				moveTo = { intTop: obj.priority, sqrTop: key };
+		});
+
+		// Check for Battle
+		if (moveTo.sqrTop) {
+			tileUnits = grabUnitsOnTile(neighbors[moveTo.sqrTop].row, neighbors[moveTo.sqrTop].col);
+			if (tileUnits.length > 0 && units[tileUnits[0]].faction != units[i].faction && units[i].attack > 0) {
+				// Battle !
+				success = battle(i, tileUnits[0]);
+				if (!success) moveTo = false;
+			}
+		}
+
+		// Move Unit
+		if (moveTo.sqrTop) {
+			moveTo = getTile(neighbors[moveTo.sqrTop].row, neighbors[moveTo.sqrTop].col);
+			if (world[moveTo].city) {
+				// Conquer Britton City
+				if (world[moveTo].city == 'britton') world[moveTo].city = 'saxon';
+				// Destroy Roman City
+				if (world[moveTo].city == 'roman') {
+					world[moveTo].city = null;
+				}
+			}
+			units[i].col = world[moveTo].col;
+			units[i].row = world[moveTo].row;
+			game.physics.moveToXY(unit, world[moveTo].x, world[moveTo].y, null, 500);
+		}
+		units[i].moves--;
+
+		} // End Moves Loop
+	});
+	// TODO: Add Saxon Units
+	if (game.turn > 5 && (game.turn % 2 || intUnits < 5 + game.turn)) {
+	}
+
+	// Start the Next Turn
+	game.turn++;
+}
+function showActions() {
+	if (!(activeUnit.index >= 0 && units[activeUnit.index].moves > 0)) return false;
+
+	// Show Action Sprites
+	$.each(actionSprites, function(i, sprite) {
+		var x = -300, y = -300, row = units[activeUnit.index].row, col = units[activeUnit.index].col;
+		if (i.indexOf('move') == 0) {
+			switch (i) {
+			case 'moveU':
+				if (col % 2 == 0) row--; col--; break;
+			case 'moveI':
+				row--; break;
+			case 'moveO':
+				if (col % 2 == 0) row--; col++; break;
+			case 'moveJ':
+				if (col % 2 == 1) row++; col--; break;
+			case 'moveK':
+				row++; break;
+			case 'moveL':
+				if (col % 2 == 1) row++; col++; break;
+			}
+			if (isLegalMove(units[activeUnit.index], row, col)) {
+				x = units[activeUnit.index].x - units[activeUnit.index]._cache.width * units[activeUnit.index].scale.x / 4;
+				y = units[activeUnit.index].y - units[activeUnit.index]._cache.height * units[activeUnit.index].scale.y / 4;
+			}
+		}
+		actionSprites[i].body.x = x;
+		actionSprites[i].body.y = y;
+	});
+	activeUnit.body.x = units[activeUnit.index].body.x;
+	activeUnit.body.y = units[activeUnit.index].body.y;
+}
+function hideActions() {
+	// Hide Action Sprites
+	$.each(actionSprites, function(i, sprite) {
+		actionSprites[i].body.x = -300;
+		actionSprites[i].body.y = -300;
+	});
+	activeUnit.body.x = -300;
+	activeUnit.body.y = -300;
+}
+function grabUnitsOnTile(row, col) {
+	var arrUnits = [];
+	$.each(units, function(i, unit) {
+		if (row == unit.row && col == unit.col) arrUnits.push(i);
+	});
+	return arrUnits;
+}
+function getCity(row, col) {
+	var faction = '';
+	$.each(world, function(i, tile) {
+		if (tile.row == row && tile.col == col) {
+			faction = tile.city;
+			return false;
+		}
+	});
+	return faction;
+}
+function getTile(row, col) {
+	var intTile = -1;
+	$.each(world, function(i, tile) {
+		if (tile.row == row && tile.col == col) {
+			intTile = i;
+			return false;
+		}
+	});
+	return intTile;
+}
+function getTileX(row, col) {
+	if (!col && col !== 0) return -300;
+	return col * 74 + 20;
+}
+function getTileY(row, col) {
+	if ((!row && row !== 0) || (!col && col !== 0)) return -300;
+	return row * 86 + (col % 2 ? 43 : 0);
+}
+function getTileCoords(tile) {
+	if ((!tile.row && tile.row !== 0) || (!tile.col && tile.col !== 0)) return { x:-300, y:-300 };
+	return { x: getTileX(tile.row, tile.col), y: getTileY(tile.row, tile.col) };
+}
+function battle(aU, dU) {
+	var	tileUnits = grabUnitsOnTile(units[dU].row, units[dU].col),
+		tile = getTile(units[dU].row, units[dU].col),
+		damage = 0;
+	units[aU].moves = 0;
+console.log(units[aU].faction + ' attacking ' + units[dU].faction);
+	do {
+		damage = 0;
+		damage += units[aU].attack / units[dU].defense * Math.random();
+		damage -= units[dU].attack / units[aU].defense * Math.random();
+		if (damage < 0) units[aU].damage(1);
+		if (damage > 0) units[dU].damage(1);
+	} while(units[aU].health >= 0 && units[dU].health >= 0);
+	return (units[aU].health >= 0);
+}
+function endGame() {
+	game.paused = true;
+	activeUnit.index = -1;
+	$.each(units, function(i, unit) {
+		if (unit.uType == 'soldier') {
+			if (unit.faction == 'britton' && unit.alive) game.score++;
+			if (unit.faction != 'britton' && !unit.alive) game.score--;
+		}
+	});
+}
+</script>
+</head>
+<body>
+<header><h1>Brython</h1></header>
+<main>
+<p>Welcome to Brython, a land of simple farmers. The Romans call this land Britannia like they own it, but they leave us
+alone as long we leave them alone. A nice thing about a large protective force is that our land has been at peace for more
+than three centuries. But the world is changing. More and more Roman legionaries are redeploying to their troubled
+provinces in the east. Trade with the rest of the empire is becoming more and more sporadic as civil wars ravage throughout
+the empire in the name of one general or another. Barbarians from the north and across the seas are raiding the
+countryside.</p>
+<p>So, Welcome to Brython. Can you lead the people through these turbulent times?</p>
+<div id="gameinfo"></div>
+</main>
+</body>
+</html>
